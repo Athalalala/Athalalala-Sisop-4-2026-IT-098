@@ -8,14 +8,6 @@ NRP            : 5027251098
 
 Departemen     : Teknologi Informasi
 
-# SISOP-3-2026-IT-083
-
-## Profil Mahasiswa
-
-Nama : Jude Athala
-NRP : 50272XXXXX
-Departemen : Teknologi Informasi
-
 # Laporan Praktikum Modul 4
 
 Praktikum Modul 4 ini membahas implementasi filesystem menggunakan FUSE (*Filesystem in Userspace*). Pada soal ini, filesystem dibuat agar dapat membaca isi folder asli dan menampilkan file virtual bernama `tujuan.txt` yang isinya digabung secara otomatis dari beberapa file sumber.
@@ -368,3 +360,6 @@ cat mnt/tujuan.txt
 ```
 
 ---
+
+## Problem Keseluruhan
+Pada penyelesaian Soal Modul 4 ini saya juga menggunakan bantuan gemini karena di peraturan diperbolehkan menggunakan Ai. Disini saya menggunakan gemini untuk membuat script, menjelaskan alur dan memecahkan masalah pada penyelesaian soal Modul 4. Berikut link percakapan saya dengan [gemini](https://gemini.google.com/share/20143847d916)
