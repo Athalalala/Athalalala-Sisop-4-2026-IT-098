@@ -366,4 +366,4 @@ Pada penyelesaian Soal Modul 4 ini saya juga menggunakan bantuan gemini karena d
 
 ## Output dari soal
 
-![image link](Assets/Gambar_72png)
+![image link](Assets/Gambar_72.png)
