@@ -8,247 +8,363 @@ NRP            : 5027251098
 
 Departemen     : Teknologi Informasi
 
+# SISOP-3-2026-IT-083
+
+## Profil Mahasiswa
+
+Nama : Jude Athala
+NRP : 50272XXXXX
+Departemen : Teknologi Informasi
+
 # Laporan Praktikum Modul 4
 
-Praktikum Modul 4 ini membahas tentang penggunaan **FUSE (Filesystem in Userspace)**, yaitu sistem yang memungkinkan kita membuat filesystem sendiri langsung dari user space tanpa perlu mengubah kernel Linux.
-
-Pada soal ini, filesystem yang dibuat harus bisa membaca file dari folder asli, menampilkan file virtual, dan menggabungkan isi beberapa file menjadi satu output baru secara otomatis.
+Praktikum Modul 4 ini membahas implementasi filesystem menggunakan FUSE (*Filesystem in Userspace*). Pada soal ini, filesystem dibuat agar dapat membaca isi folder asli dan menampilkan file virtual bernama `tujuan.txt` yang isinya digabung secara otomatis dari beberapa file sumber.
 
 ---
 
 # Soal 1 — Save Asisten Kenz
 
-## a. Download dan Ekstraksi File
+## Langkah Pengerjaan
 
-### Permasalahan
-
-Sebelum membuat filesystem, file sumber terlebih dahulu harus diambil dari Google Drive dan diekstrak agar bisa digunakan selama praktikum.
-
-### Penyelesaian
-
-File zip diunduh menggunakan `wget`, kemudian diekstrak memakai `unzip`. Setelah selesai, file zip dihapus supaya folder kerja tetap rapi.
+### 1. Membuat Direktori Praktikum
 
 ```bash
-wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=1nLXFhptDo2mnUlZsw8pTWyAVpV49W20U' -O amba_files.zip
+mkdir modul_4
+cd modul_4
+mkdir soal_1
+cd soal_1
+```
 
+---
+
+### 2. Mengekstrak File Soal
+
+```bash
 unzip amba_files.zip
-
 rm amba_files.zip
 ```
 
-### Hasil
-
-Setelah proses selesai, folder `amba_files/` berhasil muncul dan berisi file `1.txt` sampai `7.txt`.
-
 ---
 
-## b. Membuat Filesystem FUSE
+### 3. Membuat Program FUSE
 
-### Permasalahan
+```bash
+nano kenz_rescue.c
+```
 
-Filesystem yang dibuat harus bisa menampilkan isi folder asli melalui folder mount FUSE.
-
-### Penyelesaian
-
-Program dibuat menggunakan beberapa callback utama FUSE seperti:
-
-* `getattr`
-* `readdir`
-* `read`
-
-Semua path dari folder mount diarahkan menuju folder asli `amba_files`.
-
-Contoh implementasi pada fungsi `getattr`:
+Isi file `kenz_rescue.c`:
 
 ```c
-static int xmp_getattr(const char *path, struct stat *stbuf)
-{
-    char fpath[1000];
+#define FUSE_USE_VERSION 31
+#include <fuse3/fuse.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/stat.h>
 
-    sprintf(fpath, "%s%s", dirpath, path);
+static char base_dir[4096];
 
-    if (lstat(fpath, stbuf) == -1)
+static char* buat_konten_tujuan(size_t *panjang) {
+    char *hasil = NULL;
+    size_t total = 0;
+
+    for (int nomor = 3; nomor <= 7; nomor++) {
+        char lokasi[8192];
+
+        snprintf(lokasi,
+                 sizeof(lokasi),
+                 "%s/%d.txt",
+                 base_dir,
+                 nomor);
+
+        FILE *fp = fopen(lokasi, "r");
+
+        if (fp == NULL)
+            continue;
+
+        char baris[1024];
+
+        while (fgets(baris, sizeof(baris), fp) != NULL) {
+
+            if (strstr(baris, "KOORD:") != NULL) {
+
+                char *ptr = strstr(baris, "KOORD:") + 6;
+
+                size_t n = strlen(ptr);
+
+                hasil = realloc(hasil, total + n + 1);
+
+                memcpy(hasil + total, ptr, n);
+
+                total += n;
+
+                hasil[total] = '\0';
+            }
+        }
+
+        fclose(fp);
+    }
+
+    *panjang = total;
+
+    return hasil;
+}
+
+static size_t ukuran_tujuan(void) {
+
+    size_t n = 0;
+
+    char *tmp = buat_konten_tujuan(&n);
+
+    free(tmp);
+
+    return n;
+}
+
+static int rescue_getattr(const char *path,
+                          struct stat *st,
+                          struct fuse_file_info *fi) {
+
+    (void) fi;
+
+    memset(st, 0, sizeof(*st));
+
+    if (strcmp(path, "/") == 0) {
+
+        st->st_mode = S_IFDIR | 0755;
+        st->st_nlink = 2;
+
+    } else if (strcmp(path, "/tujuan.txt") == 0) {
+
+        st->st_mode = S_IFREG | 0444;
+        st->st_nlink = 1;
+        st->st_size = (off_t) ukuran_tujuan();
+
+    } else {
+
+        char full[8192];
+
+        snprintf(full,
+                 sizeof(full),
+                 "%s%s",
+                 base_dir,
+                 path);
+
+        if (lstat(full, st) == -1)
+            return -errno;
+    }
+
+    return 0;
+}
+
+static int rescue_readdir(const char *path,
+                          void *buf,
+                          fuse_fill_dir_t filler,
+                          off_t offset,
+                          struct fuse_file_info *fi,
+                          enum fuse_readdir_flags flags) {
+
+    (void) offset;
+    (void) fi;
+    (void) flags;
+
+    if (strcmp(path, "/") != 0)
+        return -ENOENT;
+
+    filler(buf, ".", NULL, 0, 0);
+    filler(buf, "..", NULL, 0, 0);
+
+    DIR *dp = opendir(base_dir);
+
+    if (dp == NULL)
         return -errno;
 
-    return 0;
-}
-```
+    struct dirent *ent;
 
-Fungsi tersebut digunakan untuk mengambil atribut file dari direktori asli agar file bisa dibaca normal melalui filesystem FUSE.
+    while ((ent = readdir(dp)) != NULL) {
 
-### Hasil
+        filler(buf,
+               ent->d_name,
+               NULL,
+               0,
+               0);
+    }
 
-Isi folder asli berhasil muncul ketika direktori mount dibuka menggunakan `ls`.
+    closedir(dp);
 
----
-
-## c. Membuat File Virtual `tujuan.txt`
-
-### Permasalahan
-
-Pada soal diminta untuk membuat file virtual bernama `tujuan.txt`. File ini tidak benar-benar ada di folder asli, tetapi harus tetap muncul ketika filesystem dijalankan.
-
-### Penyelesaian
-
-File virtual ditambahkan secara manual di fungsi `readdir` menggunakan `filler`.
-
-```c
-filler(buf, "tujuan.txt", NULL, 0);
-```
-
-Kemudian atribut file diatur pada fungsi `getattr`.
-
-```c
-if (strcmp(path, "/tujuan.txt") == 0)
-{
-    stbuf->st_mode = S_IFREG | 0444;
-    stbuf->st_nlink = 1;
-    stbuf->st_size = 66;
+    filler(buf,
+           "tujuan.txt",
+           NULL,
+           0,
+           0);
 
     return 0;
 }
-```
 
-### Hasil
+static int rescue_open(const char *path,
+                       struct fuse_file_info *fi) {
 
-Saat folder mount dibuka, file `tujuan.txt` berhasil muncul walaupun file tersebut sebenarnya tidak ada di dalam folder `amba_files`.
+    if (strcmp(path, "/tujuan.txt") == 0)
+        return 0;
 
----
+    char full[8192];
 
-## d. Menggabungkan Isi Koordinat
+    snprintf(full,
+             sizeof(full),
+             "%s%s",
+             base_dir,
+             path);
 
-### Permasalahan
+    int fd = open(full, fi->flags);
 
-Isi dari `tujuan.txt` tidak ditulis manual, tetapi harus dibuat otomatis dengan mengambil data dari file `1.txt` sampai `7.txt`.
+    if (fd == -1)
+        return -errno;
 
-### Penyelesaian
+    close(fd);
 
-Pada fungsi `read`, program membaca seluruh file satu per satu. Program mencari baris yang memiliki awalan `KOORD:` lalu mengambil isi setelahnya untuk digabung menjadi satu kalimat.
+    return 0;
+}
 
-Contoh proses pembacaan file:
+static int rescue_read(const char *path,
+                       char *buf,
+                       size_t size,
+                       off_t offset,
+                       struct fuse_file_info *fi) {
 
-```c
-char konten[200] = "Tujuan Mas Amba: ";
+    (void) fi;
 
-for (int i = 1; i <= 7; i++)
-{
-    snprintf(path,
-             sizeof(path),
-             "%s/%d.txt",
-             src_path,
-             i);
+    if (strcmp(path, "/tujuan.txt") == 0) {
 
-    // proses membuka file
-    // proses membaca KOORD:
-    // proses menggabungkan isi koordinat
+        size_t panjang = 0;
+
+        char *konten = buat_konten_tujuan(&panjang);
+
+        if (offset >= (off_t) panjang) {
+
+            free(konten);
+
+            return 0;
+        }
+
+        size_t ambil = size;
+
+        if ((size_t) offset + ambil > panjang)
+            ambil = panjang - (size_t) offset;
+
+        memcpy(buf,
+               konten + offset,
+               ambil);
+
+        free(konten);
+
+        return (int) ambil;
+    }
+
+    char full[8192];
+
+    snprintf(full,
+             sizeof(full),
+             "%s%s",
+             base_dir,
+             path);
+
+    int fd = open(full, O_RDONLY);
+
+    if (fd == -1)
+        return -errno;
+
+    int ret = (int) pread(fd,
+                          buf,
+                          size,
+                          offset);
+
+    if (ret == -1)
+        ret = -errno;
+
+    close(fd);
+
+    return ret;
+}
+
+static struct fuse_operations operasi = {
+    .getattr = rescue_getattr,
+    .readdir = rescue_readdir,
+    .open = rescue_open,
+    .read = rescue_read,
+};
+
+int main(int argc, char *argv[]) {
+
+    if (argc < 3)
+        return 1;
+
+    if (realpath(argv[1], base_dir) == NULL)
+        return 1;
+
+    argv[1] = argv[2];
+
+    argc--;
+
+    umask(0);
+
+    return fuse_main(argc,
+                     argv,
+                     &operasi,
+                     NULL);
 }
 ```
 
-### Hasil
+---
 
-Ketika file dibaca menggunakan:
+### 4. Compile Program
+
+```bash
+gcc -Wall kenz_rescue.c -o kenz_rescue `pkg-config fuse3 --cflags --libs`
+```
+
+---
+
+### 5. Install Dependency FUSE3
+
+```bash
+sudo apt update
+sudo apt install fuse3 libfuse3-dev
+```
+
+---
+
+### 6. Membuat Folder Mount
+
+```bash
+mkdir -p mnt
+```
+
+---
+
+### 7. Menjalankan Filesystem
+
+```bash
+sudo ./kenz_rescue -f amba_files mnt
+```
+
+---
+
+### 8. Mengecek Isi Filesystem
+
+```bash
+ls -l mnt/
+```
+
+---
+
+### 9. Mengecek Isi `tujuan.txt`
 
 ```bash
 cat mnt/tujuan.txt
 ```
 
-filesystem akan otomatis menampilkan gabungan koordinat dari semua file sumber.
-
 ---
-
-# Warning Saat Compile
-
-Ketika program dikompilasi menggunakan command:
-
-```bash
-gcc kenz_rescue.c -Wall `pkg-config fuse3 --cflags --libs` -o kenz_rescue
-```
-
-muncul warning seperti berikut:
-
-```bash
-warning: ‘%d’ directive output may be truncated
-```
-
-Warning ini sebenarnya bukan error, jadi program masih tetap bisa dijalankan. Compiler hanya memberi peringatan bahwa hasil `snprintf()` kemungkinan melebihi ukuran buffer yang disediakan.
-
-Bagian kode yang menyebabkan warning:
-
-```c
-snprintf(path,
-         sizeof(path),
-         "%s/%d.txt",
-         src_path,
-         i);
-```
-
-Untuk mengurangi kemungkinan tersebut, ukuran buffer bisa diperbesar.
-
-```c
-char path[8192];
-```
-
-Atau bisa juga ditambahkan pengecekan panjang hasil `snprintf()`.
-
----
-
-# Fitur Tambahan Logging
-
-Selain fitur utama, filesystem juga dibuat memiliki fitur logging.
-
-Setiap folder yang diakses akan dicatat ke file `log.log` lengkap dengan waktu aksesnya. Fitur ini dibuat menggunakan library `time.h`.
-
-Contoh isi log:
-
-```text
-Fri May 16 20:31:10 2026: /mnt
-```
-
----
-
-# Cara Menjalankan Program
-
-## Compile
-
-```bash
-gcc kenz_rescue.c -Wall `pkg-config fuse3 --cflags --libs` -o kenz_rescue
-```
-
-## Membuat Folder Mount
-
-```bash
-mkdir mnt
-```
-
-## Menjalankan Filesystem
-
-```bash
-./kenz_rescue mnt
-```
-
-## Mengecek File Virtual
-
-```bash
-cat mnt/tujuan.txt
-```
-
-## Unmount Filesystem
-
-```bash
-fusermount -u mnt
-```
-
----
-
-# Kesimpulan
-
-Pada praktikum ini berhasil dibuat filesystem berbasis FUSE yang dapat:
-
- Menampilkan isi folder asli
- 
- Membuat file virtual
- 
- Menggabungkan isi beberapa file menjadi satu output
- 
- Menampilkan isi file secara dinamis Menyimpan log akses filesystem
-
